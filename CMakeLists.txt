@@ -1,109 +1,104 @@
-cmake_minimum_required(VERSION 2.8.3)
+cmake_minimum_required(VERSION 3.8)
 project(dcl_lio_sam)
 
 set(CMAKE_BUILD_TYPE "Release")
-# set(CMAKE_CXX_FLAGS "-std=c++11")
-set(CMAKE_CXX_STANDARD 14)
-set(CMAKE_CXX_FLAGS_RELEASE "-O3 -Wall -g -pthread")
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-find_package(catkin REQUIRED COMPONENTS
-  tf
-  roscpp
-  rospy
-  cv_bridge
-  # pcl library
-  pcl_conversions
-  # msgs
-  std_msgs
-  sensor_msgs
-  geometry_msgs
-  nav_msgs
-  message_generation
-  visualization_msgs
-  gtsam_catkin
-  glog_catkin
-  distributed_mapper_catkin
-  dcl_slam
-)
+find_package(ament_cmake REQUIRED)
+find_package(rclcpp REQUIRED)
+find_package(tf2 REQUIRED)
+find_package(tf2_ros REQUIRED)
+find_package(tf2_geometry_msgs REQUIRED)
+find_package(tf2_eigen REQUIRED)
+find_package(cv_bridge REQUIRED)
+find_package(pcl_conversions REQUIRED)
+find_package(pcl_ros REQUIRED)
+find_package(std_msgs REQUIRED)
+find_package(sensor_msgs REQUIRED)
+find_package(geometry_msgs REQUIRED)
+find_package(nav_msgs REQUIRED)
+find_package(visualization_msgs REQUIRED)
+find_package(rosidl_default_generators REQUIRED)
+find_package(dcl_slam REQUIRED)
 
 find_package(Boost REQUIRED COMPONENTS filesystem system thread)
-find_package(libnabo)
 find_package(OpenMP REQUIRED)
 find_package(PCL REQUIRED)
-find_package(OpenCV REQUIRED QUIET)
+find_package(OpenCV REQUIRED)
+find_package(GTSAM REQUIRED)
+find_package(libnabo REQUIRED)
 
-add_message_files(
-  DIRECTORY msg
-  FILES
-  cloud_info.msg
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${OpenMP_CXX_FLAGS}")
+
+rosidl_generate_interfaces(${PROJECT_NAME}
+  "msg/CloudInfo.msg"
+  "srv/SaveMap.srv"
+  DEPENDENCIES geometry_msgs std_msgs nav_msgs sensor_msgs
 )
 
-add_service_files(
-  DIRECTORY srv
-  FILES
-  save_map.srv
-)
-
-generate_messages(
-  DEPENDENCIES
-  geometry_msgs
+set(dependencies
+  rclcpp
+  tf2
+  tf2_ros
+  tf2_geometry_msgs
+  tf2_eigen
+  cv_bridge
+  pcl_conversions
+  pcl_ros
   std_msgs
-  nav_msgs
   sensor_msgs
-)
-
-catkin_package(
-  INCLUDE_DIRS include
-  DEPENDS 
-
-  CATKIN_DEPENDS
-  std_msgs
-  nav_msgs
   geometry_msgs
-  sensor_msgs
-  message_runtime
-  message_generation
+  nav_msgs
   visualization_msgs
-  distributed_mapper_catkin
   dcl_slam
 )
 
-# include directories
 include_directories(
-	include
-	${catkin_INCLUDE_DIRS}
-	${PCL_INCLUDE_DIRS}
+  include
+  ${PCL_INCLUDE_DIRS}
   ${OpenCV_INCLUDE_DIRS}
+  ${GTSAM_INCLUDE_DIR}
+  /opt/ros/jazzy/include
+  ${dcl_slam_INCLUDE_DIRS}
 )
 
-# link directories
-link_directories(
-	include
-	${PCL_LIBRARY_DIRS}
-  ${OpenCV_LIBRARY_DIRS}
-  ${libnabo_LIBRARY_DIRS}
-)
+link_directories(${PCL_LIBRARY_DIRS} ${OpenCV_LIBRARY_DIRS} ${dcl_slam_LIBRARY_DIRS})
+# Link path for dcl_slam_lib
+find_library(DCL_SLAM_LIB dcl_slam_lib PATHS ${dcl_slam_DIR}/../../../lib NO_DEFAULT_PATH)
+if(NOT DCL_SLAM_LIB)
+  # Fallback: link by name and add the install lib dir
+  link_directories(${dcl_slam_DIR}/../../../lib)
+endif()
 
-###########
-## Build ##
-###########
+rosidl_get_typesupport_target(cpp_typesupport_target ${PROJECT_NAME} "rosidl_typesupport_cpp")
 
-# Range Image Projection
 add_executable(${PROJECT_NAME}_imageProjection src/imageProjection.cpp)
-add_dependencies(${PROJECT_NAME}_imageProjection ${catkin_EXPORTED_TARGETS} ${PROJECT_NAME}_generate_messages_cpp)
-target_link_libraries(${PROJECT_NAME}_imageProjection ${catkin_LIBRARIES} ${PCL_LIBRARIES} ${OpenCV_LIBRARIES})
+ament_target_dependencies(${PROJECT_NAME}_imageProjection ${dependencies})
+target_link_libraries(${PROJECT_NAME}_imageProjection ${PCL_LIBRARIES} ${OpenCV_LIBRARIES} "${cpp_typesupport_target}")
 
-# Feature Association
 add_executable(${PROJECT_NAME}_featureExtraction src/featureExtraction.cpp)
-add_dependencies(${PROJECT_NAME}_featureExtraction ${catkin_EXPORTED_TARGETS} ${PROJECT_NAME}_generate_messages_cpp)
-target_link_libraries(${PROJECT_NAME}_featureExtraction ${catkin_LIBRARIES} ${PCL_LIBRARIES} ${OpenCV_LIBRARIES})
+ament_target_dependencies(${PROJECT_NAME}_featureExtraction ${dependencies})
+target_link_libraries(${PROJECT_NAME}_featureExtraction ${PCL_LIBRARIES} ${OpenCV_LIBRARIES} "${cpp_typesupport_target}")
 
-# Mapping Optimization
 add_executable(${PROJECT_NAME}_mapOptmization src/mapOptmization.cpp)
-add_dependencies(${PROJECT_NAME}_mapOptmization ${catkin_EXPORTED_TARGETS} ${PROJECT_NAME}_generate_messages_cpp)
+ament_target_dependencies(${PROJECT_NAME}_mapOptmization ${dependencies})
 target_compile_options(${PROJECT_NAME}_mapOptmization PRIVATE ${OpenMP_CXX_FLAGS})
-target_link_libraries(${PROJECT_NAME}_mapOptmization ${catkin_LIBRARIES} ${PCL_LIBRARIES} ${OpenCV_LIBRARIES} ${OpenMP_CXX_FLAGS} ${libnabo_LIBRARIES})
+target_link_libraries(${PROJECT_NAME}_mapOptmization
+  ${PCL_LIBRARIES} ${OpenCV_LIBRARIES} ${OpenMP_CXX_FLAGS}
+  libnabo::nabo gtsam glog ${DCL_SLAM_LIB} "${cpp_typesupport_target}")
 
-# IMU Preintegration
 add_executable(${PROJECT_NAME}_imuPreintegration src/imuPreintegration.cpp)
-target_link_libraries(${PROJECT_NAME}_imuPreintegration ${catkin_LIBRARIES} ${PCL_LIBRARIES} ${OpenCV_LIBRARIES})
+ament_target_dependencies(${PROJECT_NAME}_imuPreintegration ${dependencies})
+target_link_libraries(${PROJECT_NAME}_imuPreintegration
+  ${PCL_LIBRARIES} ${OpenCV_LIBRARIES} gtsam "${cpp_typesupport_target}")
+
+install(TARGETS
+  ${PROJECT_NAME}_imageProjection
+  ${PROJECT_NAME}_featureExtraction
+  ${PROJECT_NAME}_mapOptmization
+  ${PROJECT_NAME}_imuPreintegration
+  DESTINATION lib/${PROJECT_NAME}
+)
+
+ament_package()
